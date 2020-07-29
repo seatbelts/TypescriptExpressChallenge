@@ -47,6 +47,7 @@ app.get("/", asyncHandler( async (request, response, next) => {
  *       quizIds: string[]
  *     }
  * 
+ * 
  * QUIZ:
  *   collection name: 'quizzes'
  *   object structure:
@@ -59,6 +60,30 @@ app.get("/", asyncHandler( async (request, response, next) => {
 */
 const usersColl = Firestore.collection("users")
 const quizzesColl = Firestore.collection("quizzes")
+
+const userSchema = Joi.object({
+  name: Joi.string()
+    .required(),
+  quizIds: Joi.array()
+    .items(Joi.string())
+    .default([])
+});
+
+const quizSchema = Joi.object({
+  name: Joi.string()
+    .required()
+    .min(1), 
+  description: Joi.string()
+    .optional()
+    .min(1),
+  active: Joi.boolean()
+    .optional()
+    .default(false),
+  userCount: Joi.number()
+    .default(0),
+  createdOn: Joi.date()
+    .default(admin.firestore.FieldValue.serverTimestamp())
+});
 
 /*
  * create a user
@@ -83,13 +108,14 @@ const quizzesColl = Firestore.collection("quizzes")
   }
  * 
  */
-app.post("/users", 
+app.post("/users", buildValidator(userSchema, 'body'),
   asyncHandler( async (request, response, next) => { 
 
-  // @TODO: IMPLEMENT ME
+  const body = request.body;
+  const createdUser = await createDocument(body, usersColl);
 
-  response.json("IMPLEMENT ME")
-}))
+  response.status(createdUser.status).json(createdUser.data);
+}));
 
 /*
  * get a user
@@ -109,8 +135,10 @@ app.get("/users/:userId",
   asyncHandler( async (request, response, next) => { 
 
   // @TODO: IMPLEMENT ME
+  const userId = request.params.userId;
 
-  response.json("IMPLEMENT ME")
+  const res = await getDocument(userId, usersColl);
+  response.status(res.status).json(res.data);
 }))
 
  /*
@@ -133,8 +161,10 @@ app.get("/users/:userId",
 app.delete("/users/:userId", asyncHandler( async (request, response, next) => { 
 
   // @TODO: IMPLEMENT ME
+  const userId = request.params.userId;
+  const deletedUser = await deleteDocument(userId, usersColl);
 
-  response.json("IMPLEMENT ME")
+  response.status(deletedUser.status).json(deletedUser.data)
 }))
 
 
@@ -174,12 +204,14 @@ app.delete("/users/:userId", asyncHandler( async (request, response, next) => {
  *  `admin.firestore.FieldValue.serverTimestamp()`, that will use the server timestamp
  * 
  */
-app.post("/quizzes", 
+app.post("/quizzes", buildValidator(quizSchema, 'body'),
   asyncHandler( async (request, response, next) => { 
 
   // @TODO: IMPLEMENT ME
+  const body = request.body;
+  const createdQuiz = await createDocument(body, quizzesColl);
 
-  response.json("IMPLEMENT ME")
+  response.status(createdQuiz.status).json(createdQuiz.data);
 }))
 
 
@@ -194,7 +226,7 @@ app.post("/quizzes",
  * active: boolean, optional
  * 
  * ROUTE: 
- *   POST /quizes/:quizId
+ *   PATCH /quizes/:quizId
  * 
  * EXPECTED RESPONSE:
  * JSON
@@ -205,12 +237,16 @@ app.post("/quizzes",
  * }
  * 
  */
-app.post("/quizzes/:quizId", 
+app.patch("/quizzes/:quizId", buildValidator(quizSchema, 'body'),
   asyncHandler( async (request, response, next) => { 
 
   // @TODO: IMPLEMENT ME
+  const quizId = request.params.quizId;
+  const body = request.body;
 
-  response.json("IMPLEMENT ME")
+  const res = await updateDocument(quizId, body, quizzesColl);
+
+  response.status(res.status).json(res.data);
 }))
 
 /*
@@ -228,16 +264,17 @@ app.post("/quizzes/:quizId",
  * }
  */
 app.get("/quizzes/:quizId", asyncHandler( async (request, response, next) => { 
-  // @TODO: IMPLEMENT ME
+  const quizId = request.params.quizId;
 
-  response.json("IMPLEMENT ME")
-}))
+  const res = await getDocument(quizId, quizzesColl);
+  response.status(res.status).json(res.data);
+}));
 
 /*
  * delete an individual quiz
  *
  * ROUTE: 
- *   GET /quizes/:quizId
+ *   DELETE /quizes/:quizId
  * 
  * EXPECTED RESPONSE:
  * JSON
@@ -248,9 +285,10 @@ app.get("/quizzes/:quizId", asyncHandler( async (request, response, next) => {
  * }
  */
 app.delete("/quizzes/:quizId", asyncHandler( async (request, response, next) => { 
-  // @TODO: IMPLEMENT ME
+  const quizId = request.params.quizId;
+  const deletedQuiz = await deleteDocument(quizId, quizzesColl);
 
-  response.json("IMPLEMENT ME")
+  response.status(deletedQuiz.status).json(deletedQuiz.data)
 }))
 
 /*
@@ -271,9 +309,12 @@ app.delete("/quizzes/:quizId", asyncHandler( async (request, response, next) => 
  * 
  */
 app.get("/quizzes", asyncHandler( async (request, response, next) => { 
-  // @TODO: IMPLEMENT ME
-
-  response.json("IMPLEMENT ME")
+  try {
+    const quizzes = (await quizzesColl.orderBy('createdOn', 'desc').limit(10).get()).docs.map(doc => doc.data());
+    response.status(200).json(quizzes);
+  } catch (error) {
+    response.status(500);
+  }
 }))
 
  /*
@@ -316,9 +357,79 @@ app.get("/quizzes", asyncHandler( async (request, response, next) => {
  */
 app.post("/users/:userId/quizes/:quizId", asyncHandler( async (request, response, next) => { 
   // @TODO: IMPLEMENT ME
+  const userId = request.params.userId;
+  const quizId = request.params.quizId;
 
-  response.json("IMPLEMENT ME")
+  const user = await getDocument(userId, usersColl);
+  if (user.status === 200) {
+    const quiz = await getDocument(quizId, quizzesColl);
+    if (quiz.status === 200 && !user.data.quizIds.includes(quizId)) {
+      const userUpdateData =  { quizIds: admin.firestore.FieldValue.arrayUnion(quiz.data.id) };
+      const quizUpateData = { userCount: quiz.data.userCount + 1 }
+
+      const updatedUser = await updateDocument(userId, userUpdateData, usersColl);
+      const updatedQuiz = await updateDocument(quizId, quizUpateData, quizzesColl);
+
+      response.status(200).json({ quiz: updatedQuiz.data, user: updatedUser.data });
+
+    } else {
+      response.status(quiz.status).json( user.data.quizIds.includes(quizId) ? { data: 'User has that Quiz' } : quiz.data);
+    }
+  } else {
+    response.status(user.status).json(user.data);
+  }
 }))
+
+async function createDocument(body: string, firestoreCollection: any) {
+  try {
+    const document = await firestoreCollection.add(body);
+    const createdDocument = await getDocument(document.id, firestoreCollection);
+
+    return createdDocument;
+  } catch (error) {
+    return { status: 500, data: {} };
+  }
+}
+
+async function getDocument(fieldId: string, firestoreCollection: any) {
+  try {
+    const collectionRef = firestoreCollection.doc(fieldId);
+    const document = await collectionRef.get();
+
+    if (document.exists) {
+      return { status: 200, data: { ...document.data(), id: fieldId } };
+    }
+    return { status: 404, data: {} };
+  } catch (error) {
+    return { status: 500, data: {} };
+  }
+}
+
+async function updateDocument(fieldId: string, data: any, firestoreCollection: any) {
+  try {
+    const collectionRef = firestoreCollection.doc(fieldId);
+    const documentUpdated = await collectionRef.update(data);
+    const document = await getDocument(fieldId, firestoreCollection);
+    
+    return document;
+  } catch (error) {
+    return { status: 500, data: {} };
+  }
+}
+
+async function deleteDocument(fieldId: string, firestoreCollection: any) {
+  try {
+    const collectionRef = firestoreCollection.doc(fieldId);
+    if (collectionRef) {
+      await collectionRef.delete();
+      return { status: 200, data: {} };
+    }
+
+    return { status: 404, data: {} };
+  } catch (error) {
+    return { status: 500, data: {} };
+  }
+}
 
 // Expose Express API as a single Cloud Function:
 exports.api = functions.https.onRequest(app);
